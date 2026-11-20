@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PocketPilot</string>
+    <string name="a11y_label">PocketPilot automation</string>
+    <string name="a11y_desc">Lets PocketPilot read the on-screen accessibility tree and perform taps, typing, scrolling and navigation for automation. No screenshots or vision models are used. Disable any time in Accessibility settings.</string>
+</resources>

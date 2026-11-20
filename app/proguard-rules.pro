@@ -1,0 +1,5 @@
+-dontwarn org.json.**
+-keep class dev.pocketpilot.app.PilotAccessibilityService { *; }
+-keep class dev.pocketpilot.app.PilotService { *; }
+-keep class dev.pocketpilot.app.ConfirmReceiver { *; }
+-keep class dev.pocketpilot.app.MainActivity { *; }
