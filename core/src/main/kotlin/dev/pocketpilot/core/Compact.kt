@@ -209,12 +209,14 @@ class Compactor(private val config: CompactConfig = CompactConfig()) {
             val hintOut = clean(node.hint)
             val label = adopted[e.idx]?.let { clean(it) }
             val effectiveText = textOut ?: label?.takeIf { node.text.isNullOrBlank() }
+            val cleanDesc = if (descOut != null && descOut == effectiveText) null else descOut
+            val cleanHint = if (hintOut != null && (hintOut == effectiveText || hintOut == cleanDesc)) null else hintOut
             val flags = flagsOf(node)
             val viewId = if (config.includeIds) node.viewId else null
             val signature = buildString {
                 append(node.role).append('|').append(flags).append('|')
                 append(viewId ?: "").append('|').append(effectiveText ?: "")
-                append('|').append(descOut ?: "").append('|').append(hintOut ?: "")
+                append('|').append(cleanDesc ?: "").append('|').append(cleanHint ?: "")
             }
             rawLines.add(
                 Line(
@@ -225,8 +227,8 @@ class Compactor(private val config: CompactConfig = CompactConfig()) {
                     bounds = node.bounds,
                     viewId = viewId,
                     text = if (node.password) "•••" else effectiveText,
-                    desc = descOut,
-                    hint = hintOut,
+                    desc = cleanDesc,
+                    hint = cleanHint,
                     signature = signature,
                     key = node.key
                 )

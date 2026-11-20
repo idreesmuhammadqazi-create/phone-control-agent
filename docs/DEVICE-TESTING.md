@@ -1,9 +1,79 @@
-# On-device test plan
+# On-device verification
 
-This environment had no phone or emulator, so the build is verified but the platform layer is not.
-Run this checklist on a real device before trusting the engine. It takes about 15 minutes.
+PocketPilot was verified against an **Android 14 (API 34), x86_64, 720×1280, 2 GB** emulator:
+21/21 automated checks plus the screenshot, rotation, IME, approval and agent paths listed below.
+A physical phone and OEM ROM pass is still recommended — this document is both the automated
+harness guide and the manual checklist.
 
-## Setup
+## Automated run
+
+```bash
+./tools/device-test.sh                    # APK defaults to app/build/outputs/apk/debug/
+./tools/device-test.sh path/to/app.apk
+```
+
+The harness installs the APK, enables the accessibility service through secure settings (test
+automation only — normal users enable it in the UI), forwards the port, and checks: health,
+observation, Settings navigation, tap, typing, results, scrolling, Home, `run_task`, MCP
+initialize/tools, and the stdio bridge. It exits non-zero if any check fails. Requires `adb`,
+`curl` and `node` on the host.
+
+Agent test without an API key:
+
+```bash
+node tools/mock-llm.mjs &                 # deterministic OpenAI-compatible endpoint
+# AI settings: base URL http://10.0.2.2:9099/v1, model "mock"
+curl -s -X POST http://127.0.0.1:8787/v1/tool/run_agent \
+  -H 'content-type: application/json' -d '{"goal":"go home","maxSteps":5}'
+# {"ok":true,"status":"done","summary":"mock goal complete","steps":2,...}
+```
+
+Modes: `press_home` (default), `observe`, `task` (nested `run_task`), `destructive` (taps an
+"Erase all data" label so the engine's approval gate is exercised).
+
+## Verified on API 34
+
+| Area | Result |
+|---|---|
+| Health / 15 tools | pass |
+| Compact observe, stable refs, header (`pkg`, `r0`, `kb0`, counts) | pass |
+| `open_app` by package, Settings foreground | pass |
+| Tap by ref, navigation | pass |
+| Type into Settings search, results filter | pass |
+| Scroll, diff on change | pass |
+| Home, global actions | pass |
+| `run_task` (open → wait → observe expect) | pass |
+| MCP initialize, tools/list, stdio bridge | pass |
+| Screenshot | 38 KB JPEG at 720 px |
+| Rotation | `r1`, 1280×720, refs still valid |
+| IME visible | `kb1` after focus |
+| Destructive action | `confirmation_required`; deny leaves screen untouched |
+| Approval | executes the tap; Android's own "Erase all data" confirmation still follows |
+| Long-press | `confirmation_required` (reason `long_press`) |
+| In-app dialog | deny resolves the pending action and dismisses |
+| Approval expiry | pending clears and the stale dialog is dismissed |
+| Agent + mock LLM | direct `press home` in 2 steps; nested `run_task` opens Settings |
+| Agent + destructive goal | stops with `confirmation_required`, no action taken |
+
+## Emulator setup
+
+```bash
+sdkmanager "emulator" "platform-tools" "system-images;android-34;default;x86_64"
+avdmanager create avd -n pilot34 -k "system-images;android-34;default;x86_64"
+# set hw.lcd.width=720, hw.lcd.height=1280, hw.lcd.density=320 in the AVD config
+emulator -avd pilot34 -no-window -no-audio -no-boot-anim -no-snapshot \
+  -gpu swiftshader_indirect -memory 2048 -cores 2 &
+```
+
+KVM is required for a usable boot. The service is enabled for the tests with:
+
+```bash
+adb shell settings put secure enabled_accessibility_services \
+  dev.pocketpilot/dev.pocketpilot.app.PilotAccessibilityService
+adb shell settings put secure accessibility_enabled 1
+```
+
+## Manual setup
 
 ```bash
 ./gradlew :app:assembleDebug
@@ -23,6 +93,9 @@ Useful log filter:
 ```bash
 adb logcat -s PocketPilot:V AndroidRuntime:E
 ```
+
+The harness covers sections 1–9 and 12; the safety, rotation/keyboard, agent and soak sections
+below are the parts worth doing by hand.
 
 ## 1. Server and health
 

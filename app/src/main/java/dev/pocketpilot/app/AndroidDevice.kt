@@ -40,13 +40,25 @@ class AndroidDevice(private val context: Context) : Device {
 
     override fun waitForIdle(maxMs: Long): Boolean {
         val svc = service ?: return false
-        val deadline = System.currentTimeMillis() + maxMs
+        val started = System.currentTimeMillis()
+        val deadline = started + maxMs
         var stableSince = 0L
         while (System.currentTimeMillis() < deadline) {
             val now = System.currentTimeMillis()
-            if (now - svc.lastEventAt >= 90L) {
+            // Give slow transitions (activity starts, IME animation) a moment to begin before
+            // trusting a quiet window. Otherwise an action can report "no change" too early.
+            if (now - started < 200L) {
+                try {
+                    Thread.sleep(20)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+                continue
+            }
+            if (now - svc.lastEventAt >= 120L) {
                 if (stableSince == 0L) stableSince = now
-                if (now - stableSince >= 60L) return true
+                if (now - stableSince >= 100L) return true
             } else {
                 stableSince = 0L
             }

@@ -38,7 +38,9 @@ data class EngineConfig(
     val freshRefMs: Long = 3000,
     val maxTaskSteps: Int = 40,
     val maxWaitMs: Long = 30000,
-    val diffLines: Int = 60
+    val diffLines: Int = 60,
+    /** How long open_app waits for the target package to actually reach the foreground. */
+    val launchVerifyMs: Long = 2500
 )
 
 interface EngineApi {

@@ -63,7 +63,8 @@ object ServiceTree {
     }
 
     fun imeVisible(service: AccessibilityService): Boolean = try {
-        service.windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.isActive } ?: false
+        // The IME window is visible but usually not the *active* window, so presence is the signal.
+        service.windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } ?: false
     } catch (_: Throwable) {
         false
     }

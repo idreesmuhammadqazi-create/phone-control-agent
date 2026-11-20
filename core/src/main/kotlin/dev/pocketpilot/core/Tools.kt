@@ -111,7 +111,8 @@ object Tools {
         ),
         ToolDef(
             OPEN_APP,
-            "Launch an installed app by package name or visible app name.",
+            "Launch an installed app by package name or visible name. Resets to the app's main " +
+                "screen if its task is already open.",
             """
             {"type":"object","properties":{
               "app":{"type":"string","description":"Package name (com.example.app) or visible name"}

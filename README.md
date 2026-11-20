@@ -15,7 +15,7 @@ agent (MCP / REST)  ──HTTP──▶  PocketPilot app  ──▶  Accessibili
 - **No vision.** Native accessibility data is structured, deterministic and cheap. A typical screen costs a few hundred tokens, not a 10k-token image.
 - **Element refs, not pixels.** `tap @12` survives layout changes better than `tap 540,1830`, and fails loudly (`stale_ref`) instead of tapping the wrong thing.
 - **On-device.** One APK hosts the engine, an MCP server on localhost, and an optional agent loop. No companion daemon, no root, no ADB in the loop at runtime.
-- **Small.** No AndroidX, no Compose, no image pipeline unless you explicitly ask for a screenshot. The debug APK is about 1 MB; the minified release build is ~85 KB.
+- **Small.** No AndroidX, no Compose, no image pipeline unless you explicitly ask for a screenshot. The debug APK is about 1 MB; the minified release build is ~86 KB.
 - **Safety first.** App allowlists, confirmation for destructive actions, and redaction of cards/secrets/password fields before anything reaches an agent.
 
 ## What it does
@@ -32,7 +32,7 @@ agent (MCP / REST)  ──HTTP──▶  PocketPilot app  ──▶  Accessibili
 
 ## Requirements
 
-- Android 8.0+ (API 26). Tested by build only; see [Status](#status).
+- Android 8.0+ (API 26). Validated on an Android 14 emulator; see [Status](#status).
 - A JDK 17 and the Android SDK (platform 34, build-tools 34.0.0) to build.
 - No root. No ADB at runtime (ADB is only used to forward a port or install the APK).
 
@@ -40,7 +40,7 @@ agent (MCP / REST)  ──HTTP──▶  PocketPilot app  ──▶  Accessibili
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"        # or set sdk.dir in local.properties
-./gradlew :core:test          # 57 unit tests, no device needed
+./gradlew :core:test          # 62 unit tests, no device needed
 ./gradlew :app:assembleDebug  # app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -59,6 +59,22 @@ Install:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Test the engine
+
+```bash
+./gradlew :core:test          # JVM: engine, refs, guard, router, real sockets
+./tools/device-test.sh        # device/emulator: 21 end-to-end checks
+```
+
+The device harness installs the APK, enables the accessibility service through secure settings,
+forwards the port and exercises observe/act/type/scroll/task/MCP/stdio. To test the agent loop
+without an API key:
+
+```bash
+node tools/mock-llm.mjs &     # host, deterministic OpenAI-compatible endpoint
+# In AI settings: base URL http://10.0.2.2:9099/v1 (emulator) or your LAN address, model "mock"
 ```
 
 ## First run
@@ -196,7 +212,7 @@ toggle typically returns a few hundred bytes.
 | `scroll` | `ref`, `direction`, `amount` | Scrollable ancestor, gesture fallback |
 | `swipe` | `x1`, `y1`, `x2`, `y2`, `ms` | Raw gesture |
 | `press` | `key` | `back`, `home`, `recents`, `notifications`, `quick_settings`, `enter` |
-| `open_app` | `app` | Package name or exact/unique visible name |
+| `open_app` | `app` | Package name or exact/unique visible name; resets the task to its main screen |
 | `wait_for` | `text`, `package`, `timeout` | Polls until a condition is true, then returns the screen |
 | `run_task` | `steps`, `stopOnError` | Deterministic multi-step script, optional `expect` per step |
 | `run_agent` | `goal`, `maxSteps` | Requires an LLM configured in the app |
@@ -253,7 +269,7 @@ For no-LLM workflows use `run_task`:
 ## Project layout
 
 ```
-core/                     Pure Kotlin, no Android imports. 57 unit tests.
+core/                     Pure Kotlin, no Android imports. 62 unit tests.
   Model, Compact, Diff    Raw tree, element refs, token-efficient rendering
   Guard                   Allowlist, destructive-action policy, redaction
   PilotEngine             Observe/act/task semantics, confirmations
@@ -266,7 +282,7 @@ app/                      Android shell
   PilotService            Foreground service hosting server + agent
   Agent/Llm               On-device agent loop and OpenAI-compatible client
   MainActivity            Status, settings, approvals, logs
-tools/                    stdio MCP bridge, curl helper
+tools/                    stdio bridge, curl helper, device harness, mock LLM
 docs/                     Protocol, architecture, device test plan
 ```
 
@@ -274,14 +290,16 @@ More: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PROTOCOL.md](docs/PR
 
 ## Status
 
-- `core` unit tests: **57 passing** (`./gradlew :core:test`), including real-socket HTTP/MCP tests.
-- Debug APK builds and is installable (signed with the debug key).
-- Release APK builds with R8 (~85 KB, unsigned).
-- **Not yet validated on a physical device or emulator in this environment.** The on-device layer (accessibility traversal, gestures, IME, screenshot) is written defensively but needs a real phone pass. Use [docs/DEVICE-TESTING.md](docs/DEVICE-TESTING.md) as the checklist.
+- `core` unit tests: **62 passing** (`./gradlew :core:test`), including real-socket HTTP/MCP tests.
+- End-to-end: **21/21 checks** on an Android 14 (API 34) x86_64 emulator via `tools/device-test.sh` — observe, refs, tap, type, scroll, home, multi-step task, MCP, stdio bridge.
+- Also verified on-device: screenshot capture, rotation, IME/keyboard flag, destructive approval (deny, approve, system confirmation), long-press approval, in-app deny dialog, approval expiry, and the on-device agent against a mock OpenAI-compatible server (direct and nested `run_task`).
+- Debug APK builds and installs; release APK builds with R8 (~86 KB, unsigned).
+- **Not yet validated on a physical phone or OEM ROM.** Emulator-only so far; use [docs/DEVICE-TESTING.md](docs/DEVICE-TESTING.md) on hardware.
 
 ## Known limitations
 
-- The activity name comes from window-state accessibility events; it is approximate (e.g. a dialog class) and can be empty.
+- The activity name comes from window-state accessibility events and can lag a transition by one event; the package is reliable.
+- `open_app` resets an already-open app task to its main screen (`FLAG_ACTIVITY_CLEAR_TOP`). Navigate instead if you need to preserve deep state.
 - Apps that draw everything into one canvas (games, some Flutter/Compose screens) expose few or no actionable nodes. The engine falls back to coordinate taps and gestures, but there is nothing to reason about.
 - `ACTION_SET_TEXT` is the primary typing path; a paste fallback handles most custom fields, but focus behaviour varies by keyboard/app.
 - Screenshots require Android 11+ and the accessibility screenshot capability.
@@ -297,6 +315,6 @@ More: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PROTOCOL.md](docs/PR
 | `stale_ref` | Call `observe` again; refs expire after a few snapshots or a screen change. |
 | `connection refused` | Start the server in the app; run `adb forward tcp:8787 tcp:8787`. |
 | MCP client shows 0 tools | Point it at `.../mcp`, not `/`; for stdio-only clients use the bridge. |
-| `launch_failed` | Android may block background activity starts; open the app once, then retry. |
+| `launch_failed` / `launch_blocked` | Android may block background activity starts, or the app did not settle in time; open the app once manually and retry. |
 | Text not typed | Tap the field first (focus), then `type`; some fields need `submit` to commit. |
 | Agent stops at `confirmation_required` | Approve via notification/dialog, then re-run the goal. |

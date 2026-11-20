@@ -16,6 +16,7 @@ class ConfirmReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val result = app.engine.confirm(id, approve)
+                app.agent.onConfirmationResolved(approve && result.optBoolean("ok", false))
                 LogBus.add("confirmation $id ${if (approve) "approved" else "denied"}: ${result.optString("text")}")
                 Handler(Looper.getMainLooper()).post {
                     try {

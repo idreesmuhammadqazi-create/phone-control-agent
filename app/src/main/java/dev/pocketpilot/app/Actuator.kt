@@ -200,7 +200,11 @@ class Actuator(private val context: Context, private val service: AccessibilityS
         } catch (_: Throwable) {
             null
         } ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+        )
         return try {
             context.startActivity(intent)
             true

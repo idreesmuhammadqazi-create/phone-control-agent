@@ -73,6 +73,23 @@ class PilotAgent(
         LogBus.add("agent: stop requested")
     }
 
+    /** Called by the app after a human resolves a pending approval. */
+    fun onConfirmationResolved(approved: Boolean) {
+        if (state.status == "awaiting_confirmation") {
+            state = state.copy(
+                running = false,
+                status = if (approved) "confirmed" else "denied"
+            )
+        }
+    }
+
+    /** The pending approval vanished (expired or resolved through MCP); stop claiming we wait. */
+    fun clearAwaitingConfirmation() {
+        if (state.status == "awaiting_confirmation") {
+            state = state.copy(running = false, status = "idle")
+        }
+    }
+
     // ------------------------------------------------------------ loop
 
     private fun run(goal: String, maxSteps: Int): JSONObject {

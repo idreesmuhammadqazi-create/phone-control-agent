@@ -85,6 +85,16 @@ class CompactorTest {
     }
 
     @Test
+    fun deduplicatesHintEqualToText() {
+        val snapshot = Fixtures.screen(
+            Fixtures.node("r", -1, Roles.INPUT, text = "Search…", hint = "Search…", editable = true)
+        )
+        val render = Compactor().compile(snapshot, RefRegistry(), 1)
+        assertNull(render.lines[0].hint)
+        assertFalse(render.text.endsWith("|Search…|Search…"))
+    }
+
+    @Test
     fun producesJsonElementsOnDemand() {
         val render = Compactor().compile(Fixtures.settingsScreen(), RefRegistry(), 1, withJson = true)
         assertEquals(3, render.json.length())
@@ -287,6 +297,36 @@ class PilotEngineTest {
     }
 
     @Test
+    fun typeFallsBackToSoleVisibleInput() {
+        val device = FakeDevice(
+            Fixtures.screen(
+                Fixtures.node("r", -1, Roles.INPUT, editable = true, hint = "Search")
+            )
+        )
+        val engine = PilotEngine(device)
+        engine.observe(JSONObject())
+        val result = engine.execute("type", JSONObject().put("text", "hello"))
+        assertTrue("expected fallback to the only input, got $result", result.getBoolean("ok"))
+        assertEquals("hello", device.typed?.second)
+    }
+
+    @Test
+    fun typeReportsAmbiguousInputs() {
+        val device = FakeDevice(
+            Fixtures.screen(
+                Fixtures.node("r", -1, Roles.INPUT, editable = true),
+                Fixtures.node("r/1", 0, Roles.INPUT, editable = true)
+            )
+        )
+        val engine = PilotEngine(device)
+        engine.observe(JSONObject())
+        val result = engine.execute("type", JSONObject().put("text", "hello"))
+        assertFalse(result.getBoolean("ok"))
+        assertEquals("no_focused_input", result.getString("error"))
+        assertTrue(result.getString("hint").contains("@"))
+    }
+
+    @Test
     fun destructiveTapRequiresConfirmationThenExecutes() {
         val device = FakeDevice(
             Fixtures.screen(
@@ -365,12 +405,33 @@ class PilotEngineTest {
     }
 
     @Test
+    fun typeRetriesAfterScreenTransition() {
+        val device = FakeDevice(Fixtures.screen(Fixtures.node("r", -1, Roles.TEXT, text = "Home")))
+        val engine = PilotEngine(device)
+        engine.observe(JSONObject())
+        // The search screen appears after the observation that the engine still has cached.
+        device.screen = Fixtures.screen(Fixtures.node("r/inp", -1, Roles.INPUT, editable = true))
+        val result = engine.execute("type", JSONObject().put("text", "hello"))
+        assertTrue("expected retry after transition, got $result", result.getBoolean("ok"))
+        assertEquals("hello", device.typed?.second)
+    }
+
+    @Test
     fun openAppLaunchesPackage() {
         val device = FakeDevice(Fixtures.settingsScreen())
         val engine = PilotEngine(device)
         val result = engine.execute("open_app", JSONObject().put("app", "com.example.app"))
         assertTrue(result.getBoolean("ok"))
         assertEquals("com.example.app", device.launched)
+    }
+
+    @Test
+    fun openAppReportsWhenTargetNeverArrives() {
+        val device = FakeDevice(Fixtures.settingsScreen())
+        val engine = PilotEngine(device, config = EngineConfig(launchVerifyMs = 200))
+        val result = engine.execute("open_app", JSONObject().put("app", "com.other.app"))
+        assertFalse(result.getBoolean("ok"))
+        assertEquals("launch_blocked", result.getString("error"))
     }
 
     @Test

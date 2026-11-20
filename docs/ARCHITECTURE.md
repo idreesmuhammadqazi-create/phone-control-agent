@@ -50,6 +50,9 @@ platform actions, service lifecycle, UI.
 5. **Compact** (see below) and **assign refs**.
 6. **Store.** Bounded LRU of 8 renders; `since` diffs are computed against them.
 
+The header's `kb` flag is set when any IME window exists, not only when the IME is the active window
+(it usually is not), so it reflects a visible soft keyboard.
+
 Platform node objects are recycled after conversion (a no-op on modern Android). The engine never
 holds an `AccessibilityNodeInfo`; actions carry the string key and re-find the node, which makes
 stale refs detectable rather than dangerous.
@@ -88,15 +91,19 @@ resolve target → guard → platform action → settle → snapshot → diff �
 ```
 
 - **Resolve**: use the last render if it is younger than 3 s, otherwise capture. A ref missing from
-  the current render is `stale_ref`; an editable target without a ref uses the focused `inp`.
+  the current render triggers one settle-and-recapture before `stale_ref`, which covers taps that
+  start a screen transition. An editable target without a ref uses the focused `inp`, or the sole
+  visible input (a search screen often opens with its field visible but not focused).
 - **Guard**: read-only tools bypass policy. Everything else checks the package allowlist/blocklist,
   then destructive label patterns (`pay`, `buy`, `delete`, `uninstall`, `factory reset`, `log out`,
   money + confirm, …), long-press, and password input. A blocked action is parked with a
   `confirmId` and a notification; nothing executes until `confirm`.
 - **Act**: accessibility actions first, gestures as fallback. This is what keeps the engine usable
   on Compose/Flutter/WebView screens where nodes are present but lie about clickability.
-- **Settle**: wait until no accessibility event for ~90 ms (bounded by 900 ms). Cheap on idle UIs,
-  sufficient for most transitions.
+  `open_app` adds `FLAG_ACTIVITY_CLEAR_TOP` so an existing task returns to its main screen, then
+  waits for the target package to actually reach the foreground.
+- **Settle**: a 200 ms grace (activity starts and IME animations often begin later than a quiet
+  window suggests), then no accessibility event for 120 ms, bounded by 900 ms.
 - **Diff**: compare by ref and a signature that excludes bounds. Return additions, removals and
   changes; fall back to the full tree when too much changed or the app changed.
 
@@ -158,10 +165,10 @@ capture that exceeds 4 s returns `null`, which surfaces as `no_window`/`action_f
 | UI changed under the ref | `stale_ref`, agent must observe |
 | Node lies about clickability | gesture fallback |
 | Typing ignored | paste fallback, then `action_failed` |
-| Background launch blocked | `launch_failed` with a hint |
+| Background launch blocked | `launch_blocked` after the app fails to reach the foreground |
 | Port busy | server start error in the app + notification |
 | LLM unreachable | `llm_error`, agent stops cleanly |
-| Confirmation ignored | expires after 120 s |
+| Confirmation ignored | expires after 120 s; the in-app dialog is dismissed on the next refresh |
 
 ## Extending
 
@@ -174,6 +181,20 @@ compactor, policy, tasks, agent and MCP server work unchanged.
 
 **Tune for a device:** `EngineConfig` exposes node caps, text length, settle/observe windows and
 task/wait limits; `CompactConfig` controls the renderer.
+
+## Verification
+
+- **JVM:** 62 tests in `:core` — compaction/refs/diffs, policy and redaction, engine actions and
+  tasks, MCP and REST routing, and the HTTP server over real loopback sockets (including auth,
+  `202` notifications and the SSE fallback).
+- **Emulator:** Android 14 (API 34, x86_64, 720x1280) with `tools/device-test.sh`: 21/21 checks
+  covering observe, refs, open/tap/type/scroll/press, tasks, MCP and the stdio bridge.
+- **Extra device passes:** screenshot (JPEG), rotation (`r1`, swapped dimensions), IME flag (`kb1`),
+  destructive approval (deny, approve, system confirmation), long-press approval, in-app deny
+  dialog, approval expiry, and the on-device agent against a deterministic mock LLM (a direct tool
+  call and a nested `run_task`).
+- **Still unverified:** physical phones and OEM ROMs (battery managers, custom accessibility
+  implementations), and real third-party model providers.
 
 ## Deferred
 

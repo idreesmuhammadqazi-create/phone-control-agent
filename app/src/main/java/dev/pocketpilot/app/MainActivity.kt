@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private lateinit var goalInput: EditText
 
     private var confirmDialog: AlertDialog? = null
+    private var confirmDialogId: String? = null
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -227,11 +228,21 @@ class MainActivity : Activity() {
         if (log.isNotEmpty() && logView.text.toString() != log) logView.text = log
 
         val pending = app.engine.pendingConfirmations()
-        if (pending.isNotEmpty()) showConfirm(pending.first())
+        if (pending.isEmpty() && app.agent.state.status == "awaiting_confirmation") {
+            app.agent.clearAwaitingConfirmation()
+        }
+        val shownId = confirmDialogId
+        if (shownId != null && pending.none { it.id == shownId }) {
+            // The approval expired or was resolved elsewhere; do not leave a dead dialog up.
+            confirmDialog?.dismiss()
+        } else if (pending.isNotEmpty()) {
+            showConfirm(pending.first())
+        }
     }
 
     private fun showConfirm(pending: Pending) {
         if (confirmDialog?.isShowing == true) return
+        confirmDialogId = pending.id
         confirmDialog = AlertDialog.Builder(this)
             .setTitle("Approve ${pending.reason.replace('_', ' ')}?")
             .setMessage(
@@ -241,13 +252,20 @@ class MainActivity : Activity() {
             .setPositiveButton("Approve") { _, _ ->
                 Thread {
                     val result = app.engine.confirm(pending.id, true)
+                    app.agent.onConfirmationResolved(result.optBoolean("ok", false))
                     LogBus.add("approved ${pending.id}: ${result.optString("text")}")
                 }.start()
             }
             .setNegativeButton("Deny") { _, _ ->
-                Thread { app.engine.confirm(pending.id, false) }.start()
+                Thread {
+                    app.engine.confirm(pending.id, false)
+                    app.agent.onConfirmationResolved(false)
+                }.start()
             }
-            .setOnDismissListener { confirmDialog = null }
+            .setOnDismissListener {
+                confirmDialog = null
+                confirmDialogId = null
+            }
             .show()
     }
 

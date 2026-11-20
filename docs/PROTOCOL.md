@@ -160,21 +160,22 @@ returns the full tree instead and sets `changes.full=true`.
 
 All mutating actions go through the same pipeline:
 
-1. Resolve the target (ref or focused field), refreshing the snapshot if the last one is older than 3 s.
+1. Resolve the target (ref, focused field, or the sole visible input), refresh the snapshot if the
+   last one is older than 3 s, and retry once after a transition if the target is missing.
 2. Check policy: allowlist/blocklist, destructive patterns, password entry.
 3. Perform the platform action; if the node lies about being clickable, use a gesture at its centre.
-4. Wait for the UI to settle (event-quiet for ~90 ms, bounded by 900 ms).
+4. Wait for the UI to settle (a 200 ms grace, then event-quiet for 120 ms, bounded by 900 ms).
 5. Render the new screen and return a diff (or the full tree when the change is large).
 
 | Tool | Behaviour |
 |---|---|
 | `tap` | `ACTION_CLICK` on the nearest clickable ancestor; gesture fallback. `long=true` uses `ACTION_LONG_CLICK` or a 700 ms press. |
 | `long_press` | Long-press by ref or coordinates; confirmation is always required. |
-| `type` | Focus, `ACTION_SET_TEXT` (replace or append), verify; clipboard + `ACTION_PASTE` fallback. `submit` presses the IME action when available (Android 11+). |
+| `type` | Focus, `ACTION_SET_TEXT` (replace or append), verify; clipboard + `ACTION_PASTE` fallback. With no ref it uses the focused field, or the only visible input. `submit` presses the IME action when available (Android 11+). |
 | `scroll` | Scrollable ancestor + `ACTION_SCROLL_FORWARD/BACKWARD`; otherwise a swipe inside the element or screen. `amount` 0.1–1.0. |
 | `swipe` | Linear gesture, 50–3000 ms. |
 | `press` | Global accessibility actions; `enter` uses the focused node's `ACTION_IME_ENTER` (Android 11+). |
-| `open_app` | Launch intent by package, or exact/unique label match. Ambiguous names return candidates. |
+| `open_app` | Launch intent by package, or exact/unique label match. Resets an existing task to the app's main screen (`FLAG_ACTIVITY_CLEAR_TOP`) and verifies the package reaches the foreground. Ambiguous names return candidates. |
 | `wait_for` | Poll every 200 ms until `text` appears and/or `package` is foreground; returns the screen. |
 | `run_task` | Up to 40 steps, optional `wait` before a step and `expect` substring after it. Stops on error by default. |
 | `run_agent` | Delegates to the on-device agent loop if an LLM is configured. |
@@ -212,6 +213,31 @@ Reasons: `destructive_action`, `long_press`, `password_input`.
 
 Coordinate actions (`tap` with `x`/`y`, `swipe`) cannot be label-classified. Prefer element refs
 when an action could be destructive; the guard can only reason about what it can see.
+
+## Error codes
+
+| Code | Meaning |
+|---|---|
+| `service_off` | Accessibility service not connected |
+| `no_window` | No accessible window (locked, secure, or transitioning) |
+| `stale_ref` | Ref is not on the current screen; observe again |
+| `bad_ref` | Ref could not be parsed |
+| `not_editable` | Target of `type` is not an input |
+| `no_focused_input` | `type` without a ref, and no focused or unambiguous field |
+| `package_not_allowlisted` | Policy refused the foreground app |
+| `package_blocked` | Policy blocklist refused the app |
+| `confirmation_required` | A human decision is pending; see `confirmId` |
+| `unknown_confirmation` | The id expired, was denied, or was already used |
+| `action_failed` | Platform action or gesture was rejected |
+| `launch_failed` | No launch intent for the package |
+| `launch_blocked` | The launch was dispatched but the app never reached the foreground |
+| `timeout` | `wait_for` condition not met |
+| `app_not_found` / `ambiguous_app` | App lookup failed; hint lists candidates |
+| `unknown_tool` | Tool not in the catalogue |
+| `agent_busy` | An agent run is already active |
+| `llm_error` / `llm_not_configured` | On-device agent could not call the model |
+| `agent_stuck` | The agent repeated the same action three times |
+| `max_steps` | The agent exhausted its step budget |
 
 ## run_task step schema
 

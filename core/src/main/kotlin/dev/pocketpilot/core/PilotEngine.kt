@@ -286,7 +286,33 @@ class PilotEngine(
         }
         val pre = latest
         if (!device.launch(packageName)) {
-            return failure("launch_failed", "Could not launch $packageName")
+            return failure(
+                "launch_failed",
+                "Could not launch $packageName",
+                "Check the package name, or open the app once manually."
+            )
+        }
+        val deadline = System.currentTimeMillis() + config.launchVerifyMs
+        var landed = false
+        while (System.currentTimeMillis() < deadline) {
+            if (device.currentPackage() == packageName) {
+                landed = true
+                break
+            }
+            try {
+                Thread.sleep(120)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+        }
+        if (!landed) {
+            return failure(
+                "launch_blocked",
+                "Launch of $packageName was dispatched but the app did not come to the foreground",
+                "Android can block background activity starts. Open the app once manually, or grant " +
+                    "PocketPilot 'Display over other apps'."
+            )
         }
         return finish("open_app", null, pre, JSONObject().put("package", packageName))
     }
@@ -498,11 +524,37 @@ class PilotEngine(
 
     private fun resolveTarget(args: JSONObject, needEditable: Boolean = false): Target? {
         val render = freshRender() ?: return null
+        val first = resolveTargetFrom(render, args, needEditable)
+        if (first.error == null) return first
+
+        // A transition may have happened after the render we are holding. Wait for the UI to
+        // settle, capture once, and try again before failing an action the user can see.
+        device.waitForIdle(500)
+        val snapshot = device.snapshot() ?: return first
+        val retry = resolveTargetFrom(renderSnapshot(snapshot, null, false), args, needEditable)
+        return if (retry.error == null) retry else first
+    }
+
+    private fun resolveTargetFrom(render: Render, args: JSONObject, needEditable: Boolean): Target {
         val raw = args.opt("ref")
         if (raw == null) {
             if (needEditable) {
                 val focused = render.lines.firstOrNull { it.role == Roles.INPUT && it.flags.contains('f') }
                 if (focused != null) return Target(focused, null)
+                // Tapping a search bar can open a screen whose only field is not focused yet.
+                // Typing into the sole visible field is unambiguous; focus it and proceed.
+                val editable = render.lines.filter { it.role == Roles.INPUT }
+                if (editable.size == 1) return Target(editable[0], null)
+                if (editable.size > 1) {
+                    return Target(
+                        null,
+                        failure(
+                            "no_focused_input",
+                            "Multiple text fields and none is focused",
+                            "Pass ref: " + editable.take(6).joinToString(" ") { "@${it.ref}" }
+                        )
+                    )
+                }
                 return Target(
                     null,
                     failure(
